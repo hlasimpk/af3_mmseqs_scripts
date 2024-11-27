@@ -4,7 +4,6 @@ from io import StringIO
 
 import os
 import time
-import json
 
 
 def check_chains(mmcif_file):

@@ -1,12 +1,8 @@
-# start by finding the directory where the alphafold3.py script is located
-
-from add_custom_template import get_custom_template, custom_template_argpase_util
+from add_custom_template import custom_template_argpase_util
 from add_mmseqs_msa import mmseqs2_argparse_util, add_msa_to_json
 import json
-import os
 from pathlib import Path
 import subprocess
-import re
 
 
 def run_alphafold3(
@@ -15,7 +11,6 @@ def run_alphafold3(
     model_params: str | Path,
     database_dir: str | Path,
 ) -> None:
-    print(input_json)
     input_json = Path(input_json)
     output_dir = Path(output_dir)
     cmd = rf"""
@@ -49,10 +44,10 @@ def run_alphafold3(
 
 
 def af3_argparse_main(parser):
-    parser.add_argument("input_json", help="Input sequence file")
+    parser.add_argument("input_json", help="Input sequence file", nargs="+")
 
     parser.add_argument("output_dir", help="Output directory")
-    parser.add_argument("--output_json", help="Output json file")
+    parser.add_argument("--output_json", help="Output json file", nargs="+")
     # make the vartible saved as database_dir
     parser.add_argument(
         "--database",
@@ -87,32 +82,47 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
 
-    with open(args.input_json, "r") as f:
-        af3_json = json.load(f)
+    if args.output_json and len(args.input_json) != len(args.output_json):
+        msg = "If output_json is specified, the number of output json files must \
+match the number of input json files"
+        raise ValueError(msg)
 
-    if args.mmseqs2:
-        af3_json = add_msa_to_json(
-            input_json=args.input_json,
-            templates=args.templates,
-            num_templates=args.num_templates,
-            custom_template=args.custom_template,
-            custom_template_chain=args.custom_template_chain,
-            target_id=args.target_id,
-            af3_json=af3_json,
-            output_json=args.output_json,
-            to_file=True,
-        )
+    if len(args.input_json) > 1 and args.custom_template:
+        msg = "Multiple input json files found. This is not supported with custom \
+template. Please run custom template separately for each input json file"
+        raise ValueError(msg)
 
-        output_json = (
-            args.input_json.replace(".json", "_mmseqs.json")
-            if args.output_json is None
-            else args.output_json
+    if not args.output_json:
+        args.output_json = [None] * len(args.input_json)
+
+    for i, json_file in enumerate(args.input_json):
+        with open(json_file, "r") as f:
+            af3_json = json.load(f)
+
+            if args.mmseqs2:
+                af3_json = add_msa_to_json(
+                    input_json=json_file,
+                    templates=args.templates,
+                    num_templates=args.num_templates,
+                    custom_template=args.custom_template,
+                    custom_template_chain=args.custom_template_chain,
+                    target_id=args.target_id,
+                    af3_json=af3_json,
+                    output_json=args.output_json[i],
+                    to_file=True,
+                )
+
+                run_json = (
+                    json_file.replace(".json", "_mmseqs.json")
+                    if args.output_json[i] is None
+                    else args.output_json[i]
+                )
+            else:
+                run_json = json_file
+
+        run_alphafold3(
+            input_json=run_json,
+            output_dir=args.output_dir,
+            model_params=args.model_params,
+            database_dir=args.database_dir,
         )
-    else:
-        output_json = args.input_json
-    run_alphafold3(
-        input_json=output_json,
-        output_dir=args.output_dir,
-        model_params=args.model_params,
-        database_dir=args.database_dir,
-    )

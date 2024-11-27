@@ -2,7 +2,6 @@
 
 import os
 import json
-from io import StringIO
 
 from af3_script_utils import (
     custom_template_argpase_util,
@@ -24,7 +23,7 @@ def run_custom_template(
         raise FileNotFoundError(msg)
 
     for sequence in af3_json["sequences"]:
-        if not "protein" in sequence:
+        if "protein" not in sequence:
             continue
 
         sequence = get_custom_template(
