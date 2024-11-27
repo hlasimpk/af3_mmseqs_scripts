@@ -331,21 +331,34 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(
         description="Add MMseqs2 unpaired MSA to AlphaFold3 json"
     )
-    parser.add_argument("--input_json", help="Input alphafold3 json file")
-    parser.add_argument("--output_json", help="Output alphafold3 json file")
+    parser.add_argument("--input_json", help="Input alphafold3 json file", nargs="+")
+    parser.add_argument("--output_json", help="Output alphafold3 json file", nargs="+")
 
     parser = mmseqs2_argparse_util(parser)
     parser = custom_template_argpase_util(parser)
 
     args = parser.parse_args()
+    if args.output_json and len(args.input_json) != len(args.output_json):
+        msg = "If output_json is specified, the number of output json files must \
+match the number of input json files"
+        raise ValueError(msg)
 
-    add_msa_to_json(
-        args.input_json,
-        args.templates,
-        args.num_templates,
-        args.custom_template,
-        args.custom_template_chain,
-        args.target_id,
-        output_json=args.output_json,
-        to_file=True,
-    )
+    if len(args.input_json) > 1 and args.custom_template:
+        msg = "Multiple input json files found. This is not supported with custom \
+template. Please run custom template separately for each input json file"
+        raise ValueError(msg)
+
+    if not args.output_json:
+        args.output_json = [None] * len(args.input_json)
+
+    for i, json_file in enumerate(args.input_json):
+        add_msa_to_json(
+            json_file,
+            args.templates,
+            args.num_templates,
+            args.custom_template,
+            args.custom_template_chain,
+            args.target_id,
+            output_json=args.output_json[i],
+            to_file=True,
+        )
