@@ -13,7 +13,7 @@ import requests
 from tqdm.autonotebook import tqdm
 
 import tempfile
-from af3_script_utils import (
+from af3_mmseqs2.af3_script_utils import (
     custom_template_argpase_util,
     mmseqs2_argparse_util,
     align_and_map,
@@ -23,7 +23,7 @@ from af3_script_utils import (
 )
 
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger('logger')
 
 TQDM_BAR_FORMAT = (
     "{l_bar}{bar}| {n_fmt}/{total_fmt} [elapsed: {elapsed} remaining: {remaining}]"
@@ -52,11 +52,12 @@ def add_msa_to_json(
         with open(input_json, "r") as f:
             af3_json = json.load(f)
 
-    with tempfile.TemporaryDirectory() as tmpdir:
-        for sequence in af3_json["sequences"]:
-            if "protein" in sequence:
-                input_sequence = sequence["protein"]["sequence"]
-
+    for sequence in af3_json["sequences"]:
+        if "protein" in sequence:
+            input_sequence = sequence["protein"]["sequence"]
+            with tempfile.TemporaryDirectory() as tmpdir:
+                
+                logger.info(f'Running MMseqs2 on sequence: {input_sequence}')
                 # Run MMseqs2 to get unpaired MSA
                 if templates:
                     a3m_lines, templates = run_mmseqs(
@@ -107,7 +108,7 @@ target id so that custom template can be added to the correct sequence"
 
     return af3_json
 
-
+# Code from https://github.com/sokrypton/ColabFold
 def run_mmseqs(
     x,
     prefix,
@@ -262,6 +263,7 @@ def run_mmseqs(
     tested_pdbs = []
     templates = []
     if use_templates:
+        logger.info('Finding and preparing templates')
         count = 0
         for line in open(f"{path}/pdb70.m8", "r"):
             template = {}
@@ -301,6 +303,7 @@ def run_mmseqs(
                 templates.append(template)
                 tested_pdbs.append(pdb_id)
                 count += 1
+        logger.info(f'Found the following templates: {tested_pdbs}')
 
     return (a3m_lines, templates) if use_templates else a3m_lines
 
@@ -312,13 +315,14 @@ def fetch_mmcif(
     end,
     tmpdir,
 ):
+    """Fetch the mmcif file for a given PDB ID and chain ID and prepare it for use in AlphaFold3"""
     pdb_id = pdb_id.lower()
     url_base = "http://www.ebi.ac.uk/pdbe-srv/view/files/"
     url = url_base + pdb_id + ".cif"
     response = requests.get(url)
     text = response.text
 
-    output = tmpdir + pdb_id + ".cif"
+    output = os.path.join(tmpdir, pdb_id + ".cif")
     with open(output, "w") as f:
         f.write(text)
 

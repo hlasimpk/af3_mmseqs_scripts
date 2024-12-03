@@ -1,13 +1,56 @@
 from Bio.PDB import MMCIFParser, MMCIFIO
 from Bio import pairwise2
+from colorama import Fore, Style
 from io import StringIO
+from typing import Mapping
 
+import configparser
+import logging
 import os
 import time
-import json
+
+
+# Custom formatter for colored logging
+class ColoredFormatter(logging.Formatter):
+    # Define color codes for each log level
+    LEVEL_COLORS = {
+        logging.DEBUG: Fore.BLUE,
+        logging.INFO: Fore.WHITE,
+        logging.WARNING: Fore.YELLOW,
+        logging.ERROR: Fore.RED,
+        logging.CRITICAL: Fore.RED + Style.BRIGHT,
+    }
+
+    def format(self, record):
+        # Get the color for the log level
+        level_color = self.LEVEL_COLORS.get(record.levelno, "")
+        # Format the log message
+        formatted_message = super().format(record)
+        # Return the message with the color added
+        return f"{level_color}{formatted_message}{Style.RESET_ALL}"
+
+# Set up logging
+def setup_logger():
+    logger = logging.getLogger("logger")
+    logger.setLevel(logging.DEBUG)  # Set the minimum logging level
+
+    # Create a stream handler (output to console)
+    handler = logging.StreamHandler()
+    handler.setLevel(logging.DEBUG)
+
+    # Set the custom formatter
+    formatter = ColoredFormatter("%(asctime)s - %(levelname)s - %(message)s")
+    handler.setFormatter(formatter)
+
+    # Add the handler to the logger
+    logger.addHandler(handler)
+
+    return logger
+
 
 
 def check_chains(mmcif_file):
+    """Return a list of chains in a MMCIF file."""
     parser = MMCIFParser(QUIET=True)
     structure = parser.get_structure("template", mmcif_file)
     chains = []
@@ -18,39 +61,55 @@ def check_chains(mmcif_file):
 
 
 def extract_sequence_from_mmcif(mmcif_file):
+    """Extract the sequence from a MMCIF file."""
     parser = MMCIFParser(QUIET=True)
     structure = parser.get_structure("template", mmcif_file)
     sequence = ""
-    for model in structure:
-        for chain in model:  # Assuming one chain only
-            for residue in chain:
-                if residue.id[0] == " ":  # Exclude heteroatoms
-                    sequence += residue.resname[
-                        0
-                    ]  # Simplified to take the first letter
+    model = structure[0] # Assuming one model/chain only
+    for chain in model:
+        for residue in chain:
+            if residue.id[0] == " ":  # Exclude heteroatoms
+                sequence += residue.resname[
+                    0
+                ]  # Simplified to take the first letter
     return sequence
+
+# Code from https://github.com/google-deepmind/alphafold3
+def query_to_hit_mapping(query_aligned: str, template_aligned: str) -> Mapping[int, int]:
+    """0-based query index to hit index mapping."""
+    query_to_hit_mapping_out = {}
+    hit_index = 0
+    query_index = 0
+    for q_char, t_char in zip(query_aligned, template_aligned):
+        # Gap inserted in the template
+        if q_char == '-':
+            query_index += 1
+        # Deleted residue in the template (would be a gap in the query).
+        elif t_char == '-':
+            hit_index += 1
+        # Normal aligned residue, in both query and template. Add to mapping.
+        else:
+            query_to_hit_mapping_out[query_index] = hit_index
+            query_index += 1
+            hit_index += 1
+    return query_to_hit_mapping_out
 
 
 def align_and_map(query_seq, template_seq):
+    """Align two sequences and map the indices."""
     # Perform pairwise alignment
     alignments = pairwise2.align.globalxx(query_seq, template_seq)
     alignment = alignments[0]  # Take the best alignment
     query_aligned, template_aligned, _, _, _ = alignment
 
-    # Map indices
+    # Map the aligned sequences
+    aligned_mapping = query_to_hit_mapping(query_aligned, template_aligned)
+    
     query_indices = []
     template_indices = []
-
-    query_pos, template_pos = -1, -1
-    for q_char, t_char in zip(query_aligned, template_aligned):
-        if q_char != "-":  # Not a gap in query
-            query_pos += 1
-            if t_char != "-":  # Not a gap in template
-                query_indices.append(query_pos)
-                # 1-based index for template
-                template_indices.append(template_pos + 1)
-        elif t_char != "-":  # Increment template position for gaps in query
-            template_pos += 1
+    for template_index, query_index in aligned_mapping.items():
+        query_indices.append(query_index)
+        template_indices.append(template_index)
 
     return query_indices, template_indices
 
@@ -63,6 +122,8 @@ def get_mmcif(
     end,
     tmpdir=None,
 ):
+    """Extract a chain from a CIF file and return a new CIF string with only the specified chain, residues and metadata."""
+
     parser = MMCIFParser(QUIET=True)
     structure = parser.get_structure(pdb_id, cif)
 
@@ -83,6 +144,12 @@ def get_mmcif(
         filtered_metadata["_pdbx_audit_revision_history.revision_date"] = time.strftime(
             "%Y-%m-%d"
         )
+
+    
+    # For multimodel templates (e.g. NMR) pick a single representative model
+    if len(structure) > 1:
+        for model_index in range(1, len(structure)):
+            structure.detach_child(structure[model_index].get_id())
 
     for model in structure:
         chain_to_del = []
@@ -164,6 +231,8 @@ def get_custom_template(
     custom_template,
     custom_template_chain,
 ):
+    """Add a custom template to the input json"""
+
     # add code here to run the custom template but move the res to output
     # Keep existing templates if they're present
     if "templates" not in sequence["protein"]:
